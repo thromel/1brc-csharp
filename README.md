@@ -1,50 +1,141 @@
-# 1BRC C# Solution
+# 1BRC C# solution
 
-This is a standalone .NET 10 implementation of the One Billion Row Challenge. It targets `net10.0`, the latest stable .NET major version; .NET 11 is currently preview-only. In this workspace, the scripts prefer the local bundled .NET 10 SDK/runtime when present and otherwise fall back to `dotnet` on `PATH`.
+This is a standalone C# solution for the [One Billion Row Challenge](https://github.com/gunnarmorling/1brc). It targets `net10.0`, uses NativeAOT when published, and is tuned first for a 10-core Apple Silicon machine.
 
-It reads `measurements.txt` from the current directory by default, or a path passed as the first argument:
+The current result is not a straight port of the fastest x64 submissions. Those lean heavily on AVX2 or wider vectors. This solver came from a different question: what does a serious C# implementation look like on macOS ARM64, where the full-size run eventually becomes an I/O problem rather than a parser problem?
+
+## What it does
+
+The input format is the original 1BRC contract:
+
+```text
+station-name;temperature
+```
+
+The solver preserves:
+
+- arbitrary UTF-8 station names from 1 to 100 bytes
+- up to 10,000 unique stations
+- min, mean, and max by integer tenths
+- ordinal station-name sorting
+- the expected one-decimal mean rounding
+
+The implementation stays close to the metal: unsafe byte parsing, native-memory hash tables, line-aligned work partitioning, and final decoding only after aggregation.
+
+## Quick start
+
+Build the release DLL:
+
+```sh
+dotnet build OneBrc.CSharp/OneBrc.CSharp.csproj -c Release
+```
+
+Run against a file:
 
 ```sh
 ./calculate_average_csharp.sh /path/to/measurements.txt
 ```
 
-The script builds the release DLL only when needed. To validate it from the cloned 1BRC repository, use the untracked wrapper there:
+If no path is passed, the script reads `measurements.txt` from the current directory.
 
-```sh
-./test.sh csharp
-```
-
-For the fastest local path, publish a NativeAOT binary first:
+For the fastest local path, publish NativeAOT first:
 
 ```sh
 ./publish_aot.sh
 ./calculate_average_csharp.sh /path/to/measurements.txt
 ```
 
-To force a specific SDK, set `DOTNET`:
+To force a specific SDK or runtime, set `DOTNET`:
 
 ```sh
 DOTNET=/path/to/dotnet ./publish_aot.sh
 DOTNET=/path/to/dotnet ./calculate_average_csharp.sh /path/to/measurements.txt
 ```
 
-`calculate_average_csharp.sh` prefers the current-platform NativeAOT binary when it exists and is newer than the source; otherwise it falls back to the release JIT DLL.
+`calculate_average_csharp.sh` prefers the current-platform NativeAOT binary when it exists and is newer than the source. Otherwise it falls back to the release JIT DLL.
 
-By default the program uses `Environment.ProcessorCount` workers, capped for very small files, with measured 10-core Apple Silicon heuristics for larger local benchmark files. The mmap path uses 13 workers for files at least 1 GiB and 9 workers for files at least 64 MiB. The full-size macOS `pread` path uses 8 workers after full-1B confirmation showed better wall time, CPU time, and RSS than the older 13-worker setting. For local tuning experiments, set `BRC_THREADS`:
+## Validation
+
+From the cloned upstream 1BRC repository, use the wrapper script:
+
+```sh
+./test.sh csharp
+```
+
+When touching I/O behavior, validate both input paths on macOS:
+
+```sh
+BRC_IO=mmap ./test.sh csharp
+BRC_IO=pread ./test.sh csharp
+```
+
+The project was developed with a correctness-first loop: official fixtures first, generated-output parity second, paired timings last.
+
+## Runtime controls
+
+The default runtime policy lives in `RuntimeOptions`.
 
 ```sh
 BRC_THREADS=8 ./calculate_average_csharp.sh /path/to/measurements.txt
-```
-
-The default input path is workload-size aware. Files below 8 GiB use the memory-mapped parser, which remains best on bounded 100M-style local checks. On macOS, files at least 8 GiB use a native `pread` chunk pipeline which avoids the mmap page-fault cost observed on full 1B inputs. To force either path for experiments, set `BRC_IO`:
-
-```sh
 BRC_IO=mmap ./calculate_average_csharp.sh /path/to/measurements.txt
 BRC_IO=pread ./calculate_average_csharp.sh /path/to/measurements.txt
 ```
 
-The implementation partitions work by line boundaries, parses every shard on fixed worker threads, incrementally merges partial native-memory byte-key hash tables as workers join, and decodes station names only while formatting final results. The mmap path stores station-name pointers into the mapped file; the `pread` path stores only unique station names in native arenas so chunk buffers can be reused safely. The hash tables are fixed-capacity and sized for the 1BRC 10,000-station contract. On ARM64 hardware with CRC32C support, station keys use the hardware CRC32C intrinsic for the table hash, with a portable scalar mixer fallback for other targets.
+- `BRC_THREADS` overrides worker count.
+- `BRC_IO=mmap` forces the memory-mapped path.
+- `BRC_IO=pread` forces the macOS native `pread` path.
 
-The project is organized as focused internal components: `Program` handles process I/O, `OneBrcSolver` selects the input strategy, `RangePartitioner`/`WorkerScheduler` handle mmap work, `PReadRangePartitioner`/`PReadWorkerScheduler` handle native chunked reads, `MeasurementParser` contains the allocation-free row parser, `StationKey`/`StationTable`/`StationEntry` own aggregation storage, and `ResultFormatter` performs the final sorted rendering.
+By default, smaller files use `mmap`. On macOS, files at least 8 GiB use the `pread` pipeline because full 1B runs showed the memory-mapped path spending too much time in page faults and kernel work.
 
-For a deeper component map, runtime tuning policy, and guidance for another CPU or OS, see [ARCHITECTURE.md](ARCHITECTURE.md).
+The current 10-core Apple Silicon defaults are:
+
+- mmap: 13 workers for files at least 1 GiB, 9 workers for files at least 64 MiB
+- pread: 8 workers for files at least 1 GiB, 9 workers for files at least 64 MiB
+
+These are local heuristics, not universal constants. On a different machine, start with `Environment.ProcessorCount`, sweep `BRC_THREADS`, and only then promote a new default.
+
+## Architecture
+
+The code is organized around a few internal components:
+
+- `Program` handles process input and output.
+- `OneBrcSolver` selects the input strategy.
+- `RuntimeOptions` owns environment variables and machine-tuned defaults.
+- `RangePartitioner` and `WorkerScheduler` handle the mmap path.
+- `PReadRangePartitioner`, `PReadWorkerScheduler`, and `NativePRead` handle the macOS chunked-read path.
+- `MeasurementParser` owns row parsing and temperature parsing.
+- `StationKey`, `StationTable`, and `StationEntry` own aggregation.
+- `ResultFormatter` decodes station names and writes sorted output.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the component map, porting notes, and validation policy.
+
+## What we learned
+
+The first good version looked like a normal high-performance parser problem: split the mapped file on line boundaries, parse byte ranges in parallel, keep station names as pointers, and merge native tables before formatting.
+
+That worked well on bounded 100M-row runs. It did not explain the full 1B run. On the full file, the memory-mapped path spent a large amount of time in system calls and page faults. The useful rewrite was not SIMD temperature parsing. It was a macOS `pread` pipeline that streams line-aligned ranges through reusable native buffers and copies only unique station names.
+
+On the local full-size canonical file, the shift was large: warm mmap runs were around 16 seconds, while the promoted `pread` path ran around 4 seconds. The bounded 100M benchmark still favors mmap, so the production default is workload-size aware instead of forcing `pread` everywhere.
+
+Several tempting ideas did not survive measurement:
+
+- SIMD temperature parsing regressed because the temperatures live at scattered addresses.
+- 64-byte SIMD row framing regressed because mask extraction and row bookkeeping cost more than the scalar delimiter scan saved.
+- station front caches and known-station direct paths added work to a table that already averaged near one probe on canonical data.
+- control-byte table metadata helped too little on high-cardinality data and hurt canonical data.
+- dynamic microshards reduced some CPU counters but did not robustly improve full-1B wall time.
+
+The table is no longer the obvious battlefield for this machine. The current frontier is profiling the full-size `pread` path with better hardware-counter or Time Profiler access, then making source changes only if the profile gives a clear target.
+
+Full experiment history is in [RESEARCH_NOTES.md](RESEARCH_NOTES.md).
+
+## Porting notes
+
+This code should be portable in shape, but not in tuning.
+
+- ARM64 CRC32C is used when available; `StationKey` has a scalar fallback.
+- The macOS `pread` implementation is isolated in `NativePRead`.
+- A Linux or Windows read path should be added behind a separate native wrapper and selected from `RuntimeOptions`.
+- x64 AVX2 or AVX-512 parser work should be a separate parser/key path, not mixed into the current ARM64 path.
+
+Before changing defaults on another machine, run official fixtures, compare output against the current production build on generated data, and benchmark with paired runs. Single lucky timings are not enough.
