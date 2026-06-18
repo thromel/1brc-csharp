@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/publish/
+
+.DS_Store
+*.user
+*.suo
+
+measurements.txt
+data/measurements*.txt
