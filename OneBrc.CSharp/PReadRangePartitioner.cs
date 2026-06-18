@@ -40,7 +40,7 @@ internal static unsafe class PReadRangePartitioner
         {
             if (length >= 1L << 30)
             {
-                return 13;
+                return 8;
             }
 
             if (length >= 64L << 20)

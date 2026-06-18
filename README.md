@@ -30,7 +30,7 @@ DOTNET=/path/to/dotnet ./calculate_average_csharp.sh /path/to/measurements.txt
 
 `calculate_average_csharp.sh` prefers the current-platform NativeAOT binary when it exists and is newer than the source; otherwise it falls back to the release JIT DLL.
 
-By default the program uses `Environment.ProcessorCount` workers, capped for very small files, with a measured 10-core Apple Silicon heuristic for larger local benchmark files: 13 workers for files at least 1 GiB, and 9 workers for files at least 64 MiB. For local tuning experiments, set `BRC_THREADS`:
+By default the program uses `Environment.ProcessorCount` workers, capped for very small files, with measured 10-core Apple Silicon heuristics for larger local benchmark files. The mmap path uses 13 workers for files at least 1 GiB and 9 workers for files at least 64 MiB. The full-size macOS `pread` path uses 8 workers after full-1B confirmation showed better wall time, CPU time, and RSS than the older 13-worker setting. For local tuning experiments, set `BRC_THREADS`:
 
 ```sh
 BRC_THREADS=8 ./calculate_average_csharp.sh /path/to/measurements.txt
