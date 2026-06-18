@@ -37,3 +37,5 @@ BRC_THREADS=8 ./calculate_average_csharp.sh /path/to/measurements.txt
 ```
 
 The implementation uses a memory-mapped file, partitions work by line boundaries, parses every shard on fixed worker threads, incrementally merges partial native-memory byte-key hash tables as workers join, and decodes station names only while formatting final results. The hash tables are fixed-capacity and sized for the 1BRC 10,000-station contract. On ARM64 hardware with CRC32C support, station keys use the hardware CRC32C intrinsic for the table hash, with a portable scalar mixer fallback for other targets.
+
+The project is organized as focused internal components: `Program` handles process I/O, `OneBrcSolver` owns the memory-mapped lifecycle, `RangePartitioner` and `WorkerScheduler` split and join work, `MeasurementParser` contains the allocation-free row parser, `StationKey`/`StationTable`/`StationEntry` own aggregation storage, and `ResultFormatter` performs the final sorted rendering.

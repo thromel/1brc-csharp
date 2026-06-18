@@ -16,11 +16,19 @@ DLL="$PROJECT_DIR/bin/Release/net10.0/OneBrc.CSharp.dll"
 RID=$("$SCRIPT_DIR/detect_rid.sh")
 NATIVE="$PROJECT_DIR/publish/$RID/OneBrc.CSharp"
 
-if [ -x "$NATIVE" ] && [ "$PROJECT_DIR/Program.cs" -ot "$NATIVE" ] && [ "$PROJECT_DIR/OneBrc.CSharp.csproj" -ot "$NATIVE" ]; then
+sources_newer_than() {
+  target=$1
+  [ -n "$(find "$PROJECT_DIR" \
+    -path "$PROJECT_DIR/bin" -prune -o \
+    -path "$PROJECT_DIR/obj" -prune -o \
+    -name '*.cs' -newer "$target" -print -quit)" ]
+}
+
+if [ -x "$NATIVE" ] && ! sources_newer_than "$NATIVE" && [ "$PROJECT_DIR/OneBrc.CSharp.csproj" -ot "$NATIVE" ]; then
   exec "$NATIVE" "$INPUT"
 fi
 
-if [ ! -f "$DLL" ] || [ "$PROJECT_DIR/Program.cs" -nt "$DLL" ] || [ "$PROJECT_DIR/OneBrc.CSharp.csproj" -nt "$DLL" ]; then
+if [ ! -f "$DLL" ] || sources_newer_than "$DLL" || [ "$PROJECT_DIR/OneBrc.CSharp.csproj" -nt "$DLL" ]; then
   "$DOTNET" build "$PROJECT_DIR/OneBrc.CSharp.csproj" -c Release -v q >/dev/null
 fi
 
