@@ -17,6 +17,19 @@ internal unsafe struct StationEntry
         Count = 1;
     }
 
+    public StationEntry(byte* name, in StationEntry source)
+    {
+        NamePointer = name;
+        NameLength = source.NameLength;
+        Hash = source.Hash;
+        First = source.First;
+        Last = source.Last;
+        Min = source.Min;
+        Max = source.Max;
+        Sum = source.Sum;
+        Count = source.Count;
+    }
+
     public byte* NamePointer { get; }
 
     public int NameLength { get; }

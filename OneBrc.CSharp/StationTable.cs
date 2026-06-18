@@ -7,20 +7,43 @@ internal unsafe sealed class StationTable : IDisposable
 {
     private const int InitialCapacity = 1 << 15;
     private const int CapacityMask = InitialCapacity - 1;
+    private const int NameArenaBlockSize = 1 << 20;
 
     private StationEntry* _entries = AllocateEntries(InitialCapacity);
+    private readonly bool _copyNames;
+    private readonly List<IntPtr>? _nameBlocks;
+    private byte* _nameCursor;
+    private byte* _nameEnd;
     private int _count;
+
+    public StationTable(bool copyNames = false)
+    {
+        _copyNames = copyNames;
+        _nameBlocks = copyNames ? new List<IntPtr>() : null;
+    }
 
     public void Dispose()
     {
         var entries = _entries;
-        if (entries == null)
+        if (entries != null)
+        {
+            _entries = null;
+            NativeMemory.AlignedFree(entries);
+        }
+
+        if (_nameBlocks is null)
         {
             return;
         }
 
-        _entries = null;
-        NativeMemory.AlignedFree(entries);
+        for (var i = 0; i < _nameBlocks.Count; i++)
+        {
+            NativeMemory.AlignedFree((void*)_nameBlocks[i]);
+        }
+
+        _nameBlocks.Clear();
+        _nameCursor = null;
+        _nameEnd = null;
     }
 
     public void MergeInto(StationTable results)
@@ -68,7 +91,7 @@ internal unsafe sealed class StationTable : IDisposable
 
                 if (entry.NameLength == 0)
                 {
-                    entry = new StationEntry(name, nameLength, key, temperature);
+                    entry = new StationEntry(StoreName(name, nameLength), nameLength, key, temperature);
                     _count++;
                     return;
                 }
@@ -102,7 +125,7 @@ internal unsafe sealed class StationTable : IDisposable
 
                 if (entry.NameLength == 0)
                 {
-                    entry = source;
+                    entry = new StationEntry(StoreName(source.NamePointer, source.NameLength), in source);
                     _count++;
                     return;
                 }
@@ -120,6 +143,43 @@ internal unsafe sealed class StationTable : IDisposable
                 index = (index + 1) & CapacityMask;
             }
         }
+    }
+
+    private byte* StoreName(byte* name, int nameLength)
+    {
+        if (!_copyNames)
+        {
+            return name;
+        }
+
+        if (_nameCursor == null || _nameEnd - _nameCursor < nameLength)
+        {
+            AllocateNameBlock(nameLength);
+        }
+
+        var stored = _nameCursor;
+        Buffer.MemoryCopy(name, stored, nameLength, nameLength);
+        _nameCursor += nameLength;
+        return stored;
+    }
+
+    private void AllocateNameBlock(int minimumLength)
+    {
+        var blockSize = Math.Max(NameArenaBlockSize, AlignUp(minimumLength, 64));
+        var block = (byte*)NativeMemory.AlignedAlloc((nuint)blockSize, 64);
+        if (block is null)
+        {
+            throw new OutOfMemoryException();
+        }
+
+        _nameBlocks!.Add((IntPtr)block);
+        _nameCursor = block;
+        _nameEnd = block + blockSize;
+    }
+
+    private static int AlignUp(int value, int alignment)
+    {
+        return checked((value + alignment - 1) & -alignment);
     }
 
     private static StationEntry* AllocateEntries(int capacity)

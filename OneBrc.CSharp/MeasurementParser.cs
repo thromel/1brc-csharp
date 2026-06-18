@@ -11,11 +11,17 @@ internal static unsafe class MeasurementParser
     public static StationTable ParseRange(byte* start, byte* end)
     {
         var table = new StationTable();
+        ParseRangeInto(table, start, end);
+        return table;
+    }
+
+    public static void ParseRangeInto(StationTable table, byte* start, byte* end)
+    {
         var length = end - start;
         if (length < 1 << 16)
         {
             ParseSingleCursor(table, start, end);
-            return table;
+            return;
         }
 
         var split1 = MovePointerToNextLine(start + (length / 3), end);
@@ -23,7 +29,7 @@ internal static unsafe class MeasurementParser
         if (split1 <= start || split1 >= end || split2 <= split1 || split2 >= end)
         {
             ParseSingleCursor(table, start, end);
-            return table;
+            return;
         }
 
         var cursor0 = start;
@@ -49,8 +55,6 @@ internal static unsafe class MeasurementParser
         ParseSingleCursor(table, cursor0, split1);
         ParseSingleCursor(table, cursor1, split2);
         ParseSingleCursor(table, cursor2, end);
-
-        return table;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
