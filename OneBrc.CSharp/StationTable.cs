@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace OneBrc.CSharp;
 
+// mmap tables can point directly into the mapped file; pread tables copy unique
+// station names because their reusable chunk buffers are overwritten.
 internal unsafe sealed class StationTable : IDisposable
 {
     private const int InitialCapacity = 1 << 15;

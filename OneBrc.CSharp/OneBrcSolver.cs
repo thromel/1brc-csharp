@@ -5,14 +5,12 @@ namespace OneBrc.CSharp;
 
 internal static unsafe class OneBrcSolver
 {
-    private const long PReadAutoThresholdBytes = 8L << 30;
-
     public static string Calculate(FileStream input)
     {
         ArgumentNullException.ThrowIfNull(input);
         var length = input.Length;
 
-        if (UsePRead(length))
+        if (RuntimeOptions.SelectInputStrategy(length) == InputStrategy.PRead)
         {
             return PReadSolver.Calculate(input);
         }
@@ -42,31 +40,6 @@ internal static unsafe class OneBrcSolver
             results?.Dispose();
 
             accessor.SafeMemoryMappedViewHandle.ReleasePointer();
-        }
-    }
-
-    private static bool UsePRead(long length)
-    {
-        var io = Environment.GetEnvironmentVariable("BRC_IO");
-        if (string.Equals(io, "pread", StringComparison.OrdinalIgnoreCase))
-        {
-            EnsurePReadSupported();
-            return true;
-        }
-
-        if (string.Equals(io, "mmap", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return OperatingSystem.IsMacOS() && length >= PReadAutoThresholdBytes;
-    }
-
-    private static void EnsurePReadSupported()
-    {
-        if (!OperatingSystem.IsMacOS())
-        {
-            throw new PlatformNotSupportedException("BRC_IO=pread is currently implemented for macOS.");
         }
     }
 }

@@ -6,7 +6,7 @@ internal static unsafe class PReadRangePartitioner
 
     public static InputRange[] CreateRanges(int fileDescriptor, long length)
     {
-        var workerCount = GetWorkerCount(length);
+        var workerCount = RuntimeOptions.GetPReadWorkerCount(length);
         var ranges = new InputRange[workerCount];
 
         for (var i = 0; i < workerCount; i++)
@@ -17,39 +17,6 @@ internal static unsafe class PReadRangePartitioner
         }
 
         return ranges;
-    }
-
-    private static int GetWorkerCount(long length)
-    {
-        var maxUsefulWorkers = Math.Max(1, (int)((length + (1 << 20) - 1) >> 20));
-        var processorCount = Environment.ProcessorCount;
-        var workerCount = GetDefaultWorkerCount(length, processorCount);
-
-        var configured = Environment.GetEnvironmentVariable("BRC_THREADS");
-        if (configured is not null && int.TryParse(configured, out var configuredWorkerCount) && configuredWorkerCount > 0)
-        {
-            workerCount = configuredWorkerCount;
-        }
-
-        return Math.Min(workerCount, maxUsefulWorkers);
-    }
-
-    private static int GetDefaultWorkerCount(long length, int processorCount)
-    {
-        if (processorCount == 10)
-        {
-            if (length >= 1L << 30)
-            {
-                return 8;
-            }
-
-            if (length >= 64L << 20)
-            {
-                return 9;
-            }
-        }
-
-        return processorCount;
     }
 
     private static long MoveToNextLine(int fileDescriptor, long offset, long length)
