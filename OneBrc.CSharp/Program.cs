@@ -2,6 +2,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Numerics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics;
 using System.Text;
 
@@ -606,9 +607,20 @@ internal readonly unsafe struct StationKey
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static StationKey Create(int length, ulong first, ulong last)
     {
-        var mixed = (first * HashMultiplier) ^ BitOperations.RotateLeft(last, 42) ^ (uint)length;
-        mixed ^= mixed >> 32;
-        return new StationKey(unchecked((int)mixed), first, last);
+        uint hash;
+        if (Crc32.Arm64.IsSupported)
+        {
+            hash = Crc32.Arm64.ComputeCrc32C((uint)length, first);
+            hash = Crc32.Arm64.ComputeCrc32C(hash, last);
+        }
+        else
+        {
+            var mixed = (first * HashMultiplier) ^ BitOperations.RotateLeft(last, 42) ^ (uint)length;
+            mixed ^= mixed >> 32;
+            hash = (uint)mixed;
+        }
+
+        return new StationKey(unchecked((int)hash), first, last);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
