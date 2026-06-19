@@ -2,7 +2,7 @@
 
 This is a standalone C# solution for the [One Billion Row Challenge](https://github.com/gunnarmorling/1brc). It targets `net10.0`, uses NativeAOT when published, and is tuned first for a 10-core Apple Silicon machine.
 
-The current result is not a straight port of the fastest x64 submissions. Those lean heavily on AVX2 or wider vectors. This solver came from a different question: what does a serious C# implementation look like on macOS ARM64, where the full-size run eventually becomes an I/O problem rather than a parser problem?
+The current result is not a straight port of the fastest x64 submissions. Those lean heavily on AVX2 or wider vectors. This solver came from a different question: what does a serious C# implementation look like on macOS ARM64 when the full-size run exposes a VM/page-fault bottleneck that the bounded parser benchmarks do not show?
 
 ## What it does
 
@@ -85,7 +85,7 @@ BRC_IO=pread ./calculate_average_csharp.sh /path/to/measurements.txt
 - `BRC_IO=mmap` forces the memory-mapped path.
 - `BRC_IO=pread` forces the macOS native `pread` path.
 
-By default, smaller files use `mmap`. On macOS, files at least 8 GiB use the `pread` pipeline because full 1B runs showed the memory-mapped path spending too much time in page faults and kernel work.
+By default, smaller files use `mmap`. On macOS, files at least 8 GiB use the `pread` pipeline because paired full 1B runs on this host showed the memory-mapped path spending heavily in page faults and kernel work.
 
 The current 10-core Apple Silicon defaults are:
 
@@ -115,7 +115,7 @@ The first good version looked like a normal high-performance parser problem: spl
 
 That worked well on bounded 100M-row runs. It did not explain the full 1B run. On the full file, the memory-mapped path spent a large amount of time in system calls and page faults. The useful rewrite was not SIMD temperature parsing. It was a macOS `pread` pipeline that streams line-aligned ranges through reusable native buffers and copies only unique station names.
 
-On the local full-size canonical file, the shift was large: warm mmap runs were around 16 seconds, while the promoted `pread` path ran around 4 seconds. The bounded 100M benchmark still favors mmap, so the production default is workload-size aware instead of forcing `pread` everywhere.
+On the local full-size canonical file, the shift was large. A first parity run measured mmap/pread wall time at `16.227s`/`4.297s`, with system time at `26.026s`/`3.902s` and major faults at `777206`/`76`. Five paired warm full-1B runs kept the same shape: `pread` won `5/5`, with median candidate-minus-baseline deltas of `-11.785s` wall, `-26.445s` system time, and `-842044` major faults. The bounded 100M benchmark still favors mmap, so the promoted default is workload-size aware instead of forcing `pread` everywhere.
 
 Several tempting ideas did not survive measurement:
 
@@ -138,4 +138,4 @@ This code should be portable in shape, but not in tuning.
 - A Linux or Windows read path should be added behind a separate native wrapper and selected from `RuntimeOptions`.
 - x64 AVX2 or AVX-512 parser work should be a separate parser/key path, not mixed into the current ARM64 path.
 
-Before changing defaults on another machine, run official fixtures, compare output against the current production build on generated data, and benchmark with paired runs. Single lucky timings are not enough.
+Before changing defaults on another machine, run official fixtures, compare output against the current promoted build on generated data, and benchmark with paired runs. Single lucky timings are not enough.
